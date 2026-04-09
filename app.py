@@ -17,6 +17,7 @@ MESES_BR = {
 
 # Inicialização do App
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
+server = app.server # Expondo o servidor Flask para o Gunicorn
 
 # Cores baseadas na identidade visual (Será ajustado melhor com a paleta mais tarde)
 COLORS = {
