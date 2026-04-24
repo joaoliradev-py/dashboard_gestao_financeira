@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import dash
 from dash import dcc, html
 from dash.dependencies import Input, Output
@@ -15,8 +15,21 @@ MESES_BR = {
     7: 'Julho', 8: 'Agosto', 9: 'Setembro', 10: 'Outubro', 11: 'Novembro', 12: 'Dezembro'
 }
 
+RESET_DAY = 25
+
+def get_cycle_start(date):
+    """Retorna o início do ciclo financeiro para uma determinada data."""
+    if date.day < RESET_DAY:
+        m = date.month - 1
+        y = date.year
+        if m == 0:
+            m = 12
+            y -= 1
+        return datetime(y, m, RESET_DAY)
+    return datetime(date.year, date.month, RESET_DAY)
+
 # Inicialização do App
-app = dash.Dash(__name__, suppress_callback_exceptions=True)
+app = dash.Dash(__name__, suppress_callback_exceptions=True, assets_folder='Assets')
 server = app.server # Expondo o servidor Flask para o Gunicorn
 
 # Cores baseadas na identidade visual (Será ajustado melhor com a paleta mais tarde)
@@ -92,8 +105,16 @@ def fetch_data():
 # Layouts
 sidebar = html.Div(
     [
-        html.H2("Gestão", className="display-4", style={'color': COLORS['sidebar_text'], 'padding': '20px'}),
-        html.Hr(style={'borderColor': '#34495e'}),
+        html.Div(
+            html.Img(src='/assets/Topsi.png', className='float-animation', style={
+                'width': '100px', 
+                'height': '100px', 
+                'borderRadius': '50%', 
+                'border': '3px solid #ecf0f1',
+                'objectFit': 'cover'
+            }), 
+            style={'textAlign': 'center', 'padding': '20px'}
+        ),
         html.Div([
             html.Label("Sua Renda Mensal (R$):", style={'color': '#bdc3c7', 'fontSize': '14px', 'marginBottom': '5px', 'display': 'block'}),
             dcc.Input(
@@ -106,10 +127,10 @@ sidebar = html.Div(
         ], style={'padding': '0 20px', 'marginTop': '10px'}),
         html.Ul(
             [
-                html.Li(dcc.Link("Tabela de Gastos do Mês", href="/", style={'color': COLORS['sidebar_text'], 'textDecoration': 'none'})),
-                html.Li(dcc.Link("Gráficos de Gastos Mensais", href="/graficos", style={'color': COLORS['sidebar_text'], 'textDecoration': 'none'})),
+                html.Li(dcc.Link("Tabela de Gastos do Mês", href="/", className='sidebar-link', style={'color': COLORS['sidebar_text'], 'textDecoration': 'none'})),
+                html.Li(dcc.Link("Gráficos de Gastos Mensais", href="/graficos", className='sidebar-link', style={'color': COLORS['sidebar_text'], 'textDecoration': 'none'})),
             ],
-            style={'listStyleType': 'none', 'padding': '20px', 'lineHeight': '2'}
+            style={'listStyleType': 'none', 'padding': '20px'}
         )
     ],
     style={
@@ -123,7 +144,12 @@ sidebar = html.Div(
     },
 )
 
-content = html.Div(id="page-content", style={"marginLeft": "270px", "padding": "20px", "backgroundColor": COLORS['bg'], "minHeight": "100vh"})
+content = dcc.Loading(
+    id="loading-content",
+    type="dot",
+    children=html.Div(id="page-content", style={"marginLeft": "270px", "padding": "20px", "backgroundColor": COLORS['bg'], "minHeight": "100vh"}),
+    color=COLORS['primary']
+)
 
 app.layout = html.Div(
     [dcc.Location(id="url"), sidebar, content],
@@ -137,57 +163,72 @@ def render_page_content(pathname, salario_input):
     df_notas, df_tabela = fetch_data()
     
     if pathname == "/":
+        current_cycle_start = get_cycle_start(datetime.now())
+        
+        # Filtra a tabela para mostrar apenas itens do ciclo atual
+        df_tabela_filtrada = pd.DataFrame()
+        if not df_tabela.empty:
+            df_tabela['date_obj'] = pd.to_datetime(df_tabela['Data Compra'], format='%d/%m/%Y')
+            df_tabela_filtrada = df_tabela[df_tabela['date_obj'] >= current_cycle_start]
+            df_tabela_filtrada = df_tabela_filtrada.drop(columns=['date_obj'])
+
         return html.Div([
-            html.H1('Itens Comprados', style={'color': COLORS['text']}),
+            html.H1(f'Itens Comprados (desde {current_cycle_start.strftime("%d/%m")})', style={'color': COLORS['text']}),
             html.Div([
                 # Simples representação de tabela baseada no DF formatado
                 html.Table(
                     # Header
-                    [html.Tr([html.Th(col, style={'padding': '10px', 'borderBottom': '3px solid #ddd', 'color': COLORS['sidebar']}) for col in df_tabela.columns])] +
+                    [html.Tr([html.Th(col, style={'padding': '10px', 'borderBottom': '3px solid #ddd', 'color': COLORS['sidebar']}) for col in df_tabela_filtrada.columns])] +
                     # Body
-                    [html.Tr([html.Td(df_tabela.iloc[i][col], style={'padding': '8px', 'borderBottom': '1px solid #f1f1f1'}) for col in df_tabela.columns]) for i in range(len(df_tabela))],
+                    [html.Tr([html.Td(df_tabela_filtrada.iloc[i][col], style={'padding': '8px', 'borderBottom': '1px solid #f1f1f1'}) for col in df_tabela_filtrada.columns]) for i in range(len(df_tabela_filtrada))],
                     style={'width': '100%', 'textAlign': 'left', 'backgroundColor': COLORS['card'], 'padding': '15px', 'borderRadius': '10px', 'fontSize': '13px'}
                 )
-            ], style={'overflowX': 'auto', 'marginTop': '20px'}) if not df_tabela.empty else html.P("Nenhum dado encontrado.")
-        ])
+            ], style={'overflowX': 'auto', 'marginTop': '20px'}) if not df_tabela_filtrada.empty else html.P("Nenhum dado encontrado para o ciclo atual.")
+        ], className='fade-in')
     elif pathname == "/graficos":
         hoje = datetime.now()
-        mes_atual = hoje.month
-        ano_atual = hoje.year
-        titulo_dinamico = f"Gráficos de Gastos do mês de {MESES_BR[mes_atual]}"
+        current_cycle_start = get_cycle_start(hoje)
+        titulo_dinamico = f"Gastos a partir do dia: 25 de {MESES_BR[current_cycle_start.month]}"
 
-        # Filtrar DF para o mês atual para a caixa de "Gasto no Mês"
-        df_notas_mes_atual = pd.DataFrame()
+        # Filtrar DF para o ciclo atual para a caixa de "Gasto no Mês"
         total_gasto = 0
         if not df_notas.empty:
             df_notas['date_obj'] = pd.to_datetime(df_notas['data_compra_grafico'])
-            df_notas_mes_atual = df_notas[(df_notas['date_obj'].dt.month == mes_atual) & (df_notas['date_obj'].dt.year == ano_atual)]
-            if "total" in df_notas_mes_atual.columns:
-                total_gasto = df_notas_mes_atual["total"].sum()
+            df_notas_ciclo_atual = df_notas[df_notas['date_obj'] >= current_cycle_start]
+            if "total" in df_notas_ciclo_atual.columns:
+                total_gasto = df_notas_ciclo_atual["total"].sum()
 
         tabs_historico = []
         if not df_notas.empty:
+            ref_date = hoje
+            next_cycle_start = None
             for i in range(3): # Historico do Mês atual e 2 passados
-                m = mes_atual - i
-                y = ano_atual
-                if m <= 0:
-                    m += 12
-                    y -= 1
+                cycle_start = get_cycle_start(ref_date)
                 
-                df_mes = df_notas[(df_notas['date_obj'].dt.month == m) & (df_notas['date_obj'].dt.year == y)]
-                nome_tab = MESES_BR[m]
+                if i == 0:
+                    # Ciclo atual (do dia 25 até hoje)
+                    df_ciclo = df_notas[df_notas['date_obj'] >= cycle_start]
+                    label = f"{MESES_BR[cycle_start.month]} (Atual)"
+                else:
+                    # Ciclos anteriores (entre dois dias 25)
+                    df_ciclo = df_notas[(df_notas['date_obj'] >= cycle_start) & (df_notas['date_obj'] < next_cycle_start)]
+                    label = f"{MESES_BR[cycle_start.month]} de {cycle_start.year}"
                 
                 fig = px.line(
-                    df_mes, x="data_compra_grafico", y="total", 
-                    title=f"Evolução de Gastos - {nome_tab}", markers=True
-                ) if not df_mes.empty else px.line(title=f"Você não teve gastos em {nome_tab}")
+                    df_ciclo, x="data_compra_grafico", y="total", 
+                    title=f"Evolução de Gastos - {label}", markers=True
+                ) if not df_ciclo.empty else px.line(title=f"Sem gastos em: {label}")
                 
                 fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(t=40, b=40, l=40, r=40))
                 
-                abas = dcc.Tab(label=f"{nome_tab} de {y}" if i > 0 else f"{nome_tab} (Atual)", children=[
+                abas = dcc.Tab(label=label, children=[
                     html.Div(dcc.Graph(figure=fig), style={'padding': '20px', 'backgroundColor': '#ffffff', 'borderRadius': '0 0 10px 10px'})
                 ])
                 tabs_historico.append(abas)
+                
+                # Prepara para o ciclo anterior
+                next_cycle_start = cycle_start
+                ref_date = cycle_start - timedelta(days=1)
         else:
              tabs_historico.append(dcc.Tab(label="Atual", children=[dcc.Graph(figure=px.line(title="Sem dados suficientes"))]))
 
@@ -197,11 +238,11 @@ def render_page_content(pathname, salario_input):
                 html.Div([
                     html.H3("Gasto no Mês", style={'margin': 0, 'color': '#7f8c8d'}),
                     html.H2(f"R$ {total_gasto:.2f}", style={'margin': 0, 'color': '#e74c3c'})
-                ], style={'backgroundColor': COLORS['card'], 'padding': '20px', 'borderRadius': '10px', 'width': '30%', 'display': 'inline-block', 'marginRight': '20px'}),
+                ], className='custom-card', style={'backgroundColor': COLORS['card'], 'padding': '20px', 'borderRadius': '10px', 'width': '30%', 'display': 'inline-block', 'marginRight': '20px'}),
                 html.Div([
                     html.H3("Dinheiro Restante", style={'margin': 0, 'color': '#7f8c8d'}),
                     html.H2(f"R$ {(salario - total_gasto):.2f}", style={'margin': 0, 'color': '#2ecc71'})
-                ], style={'backgroundColor': COLORS['card'], 'padding': '20px', 'borderRadius': '10px', 'width': '30%', 'display': 'inline-block'}),
+                ], className='custom-card', style={'backgroundColor': COLORS['card'], 'padding': '20px', 'borderRadius': '10px', 'width': '30%', 'display': 'inline-block'}),
             ], style={'marginBottom': '30px'}),
             html.Div([
                 dcc.Tabs(children=tabs_historico, colors={
@@ -210,7 +251,7 @@ def render_page_content(pathname, salario_input):
                     "background": "#f9f9f9"
                 })
             ], style={'backgroundColor': 'transparent', 'borderRadius': '10px'})
-        ])
+        ], className='fade-in')
     return html.Div([
         html.H1("404: Não Encontrado", className="text-danger"),
         html.Hr(),
