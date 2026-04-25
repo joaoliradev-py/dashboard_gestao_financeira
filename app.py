@@ -29,7 +29,12 @@ def get_cycle_start(date):
     return datetime(date.year, date.month, RESET_DAY)
 
 # Inicialização do App
-app = dash.Dash(__name__, suppress_callback_exceptions=True, assets_folder='Assets')
+app = dash.Dash(
+    __name__, 
+    suppress_callback_exceptions=True, 
+    assets_folder='Assets',
+    title="Tospi Gestão Financeira"
+)
 server = app.server # Expondo o servidor Flask para o Gunicorn
 
 # Cores baseadas na identidade visual (Será ajustado melhor com a paleta mais tarde)
@@ -144,6 +149,15 @@ sidebar = html.Div(
     },
 )
 
+def get_cycle_label(start_date):
+    """Gera uma string amigável para o intervalo do ciclo."""
+    m_end = start_date.month + 1
+    y_end = start_date.year
+    if m_end > 12:
+        m_end = 1
+        y_end += 1
+    return f"25 de {MESES_BR[start_date.month]} até 24 de {MESES_BR[m_end]}"
+
 content = dcc.Loading(
     id="loading-content",
     type="dot",
@@ -173,7 +187,7 @@ def render_page_content(pathname, salario_input):
             df_tabela_filtrada = df_tabela_filtrada.drop(columns=['date_obj'])
 
         return html.Div([
-            html.H1(f'Itens Comprados (desde {current_cycle_start.strftime("%d/%m")})', style={'color': COLORS['text']}),
+            html.H1(f'Itens Comprados ({get_cycle_label(current_cycle_start)})', style={'color': COLORS['text'], 'fontSize': '24px'}),
             html.Div([
                 # Simples representação de tabela baseada no DF formatado
                 html.Table(
@@ -188,7 +202,7 @@ def render_page_content(pathname, salario_input):
     elif pathname == "/graficos":
         hoje = datetime.now()
         current_cycle_start = get_cycle_start(hoje)
-        titulo_dinamico = f"Gastos a partir do dia: 25 de {MESES_BR[current_cycle_start.month]}"
+        titulo_dinamico = f"Resumo: {get_cycle_label(current_cycle_start)}"
 
         # Filtrar DF para o ciclo atual para a caixa de "Gasto no Mês"
         total_gasto = 0
@@ -208,11 +222,11 @@ def render_page_content(pathname, salario_input):
                 if i == 0:
                     # Ciclo atual (do dia 25 até hoje)
                     df_ciclo = df_notas[df_notas['date_obj'] >= cycle_start]
-                    label = f"{MESES_BR[cycle_start.month]} (Atual)"
+                    label = "Ciclo Atual"
                 else:
                     # Ciclos anteriores (entre dois dias 25)
                     df_ciclo = df_notas[(df_notas['date_obj'] >= cycle_start) & (df_notas['date_obj'] < next_cycle_start)]
-                    label = f"{MESES_BR[cycle_start.month]} de {cycle_start.year}"
+                    label = get_cycle_label(cycle_start)
                 
                 fig = px.line(
                     df_ciclo, x="data_compra_grafico", y="total", 
