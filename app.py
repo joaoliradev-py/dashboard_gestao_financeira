@@ -1,4 +1,5 @@
 import os
+import sys
 from datetime import datetime, timedelta
 import dash
 from dash import dcc, html
@@ -9,6 +10,14 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 
 load_dotenv()
+
+def resource_path(relative_path):
+    """ Retorna o caminho absoluto para recursos, funcionando em dev e no PyInstaller """
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 MESES_BR = {
     1: 'Janeiro', 2: 'Fevereiro', 3: 'Março', 4: 'Abril', 5: 'Maio', 6: 'Junho',
@@ -32,8 +41,8 @@ def get_cycle_start(date):
 app = dash.Dash(
     __name__, 
     suppress_callback_exceptions=True, 
-    assets_folder='Assets',
-    title="Tospi Gestão Financeira"
+    assets_folder=resource_path('Assets'),
+    title="Topsi Gestão Financeira"
 )
 server = app.server # Expondo o servidor Flask para o Gunicorn
 
@@ -228,10 +237,17 @@ def render_page_content(pathname, salario_input):
                     df_ciclo = df_notas[(df_notas['date_obj'] >= cycle_start) & (df_notas['date_obj'] < next_cycle_start)]
                     label = get_cycle_label(cycle_start)
                 
-                fig = px.line(
-                    df_ciclo, x="data_compra_grafico", y="total", 
-                    title=f"Evolução de Gastos - {label}", markers=True
-                ) if not df_ciclo.empty else px.line(title=f"Sem gastos em: {label}")
+                if not df_ciclo.empty:
+                    # Agrupa por dia e soma o total para evitar linhas verticais
+                    df_grafico = df_ciclo.groupby('data_compra_grafico')['total'].sum().reset_index()
+                    df_grafico = df_grafico.sort_values('data_compra_grafico')
+                    
+                    fig = px.line(
+                        df_grafico, x="data_compra_grafico", y="total", 
+                        title=f"Evolução de Gastos - {label}", markers=True
+                    )
+                else:
+                    fig = px.line(title=f"Sem gastos em: {label}")
                 
                 fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(t=40, b=40, l=40, r=40))
                 
